@@ -4,7 +4,7 @@ import sys
 import argparse
 
 import pandas as pd
-
+#import matplotlib.pyplot as plt
 import vocloud_spark_preprocess.preprocess_data as prep
 import logging
 import logging.config
@@ -26,7 +26,7 @@ def parse_labeled_line(line, metadata, has_class):
     if has_class:
         numbers = [float(num) for num in line_elements[1:-1]]
         header = list(metadata) + ["label"]
-        numbers.append(line_elements[-1])
+        numbers.append(int(line_elements[-1]))
     else:
         numbers = [float(num) for num in line_elements[1:]]
         header = list(metadata)
@@ -36,6 +36,13 @@ def parse_args(argv):
     parser = argparse.ArgumentParser("vocloud_spark_preprocess")
     parser.add_argument("config", type=str)
     return parser.parse_args(argv)
+
+#def plot_spectra(spectra_file, header, out_folder):
+#    with open(spectra_file) as spectra:
+#        for line in spectra:
+#            spectrum = parse_labeled_line(line, header)
+#            spectrum.iloc[0].plot()
+#            plt.savefig(out_folder + "/" + spectrum.index[0] + ".png")
 
 def main(argv):
     logging.config.fileConfig(os.path.join(os.path.dirname(os.path.realpath(__file__)), "logging.ini"))
@@ -49,7 +56,13 @@ def main(argv):
     metadata = parse_metadata(preprocess_conf["labeled"]["metadata"])
     labeled = sc.textFile(preprocess_conf["labeled"]["file"]).map(lambda x: parse_labeled_line(x, metadata, True)).cache()
     resampled = preprocessor.preprocess(files, labeled).cache()
-    resampled.map(lambda x: x.to_csv(None, header=None).rstrip("\n")).saveAsTextFile("out")
+    header = resampled.take(1)[0].columns
+    resampled.map(lambda x: x.to_csv(None, header=None).rstrip("\n")).coalesce(1).saveAsTextFile("out")
+    os.rename("out/part-00000", preprocess_conf["output"])
+#    if preprocess_conf["plot"]:
+#        os.mkdir("plot")
+#        plot_spectra(preprocess_conf["output"], header)
+
 
 if __name__ == '__main__':
     main(sys.argv[1:])

@@ -17,8 +17,7 @@ class Preprocessing(object):
     def __init__(self):
         """
 
-        :param sc: The SparkContext object
-        """
+            """
         self.logger = logging.getLogger(__name__)
 
     def parse_votable(self, file):
@@ -34,7 +33,7 @@ class Preprocessing(object):
                               index=[os.path.splitext(os.path.basename(file))[0]])
         return series
 
-    def resample(self, spectrum: pd.DataFrame, low: float, high: float, step: float, label_col=None):
+    def resample(self, spectrum: pd.DataFrame, low: float, high: float, step: float, label_col=None, convolve=False):
         """Resamples the spectrum so that the x-axis starts at low and ends at high, while
         keeping the delta between the wavelengths"""
         resampled_header = np.arange(low, high, step)
@@ -44,9 +43,12 @@ class Preprocessing(object):
             without_label.columns = pd.to_numeric(without_label.columns, errors="ignore")
         else:
             without_label = spectrum
-        convolved = convolution.convolve(without_label.iloc[0].values, convolution.Gaussian1DKernel(1))
-        self.logger.debug(convolved)
-        interpolated = np.interp(resampled_header, without_label.columns.values, convolved)
+        if convolve:
+            to_interpolate = convolution.convolve(without_label.iloc[0].values, convolution.Gaussian1DKernel(6))
+        else:
+            to_interpolate = without_label.iloc[0].values
+        self.logger.debug(without_label)
+        interpolated = np.interp(resampled_header, without_label.columns.values, to_interpolate, left=0.0, right=0.0)
         self.logger.debug("Interpolated:%s", interpolated)
         interpolated_df = pd.DataFrame(data=[interpolated], columns=resampled_header, index=[spectrum.index.values])
         if label_col is not None:
@@ -85,7 +87,7 @@ class Preprocessing(object):
 
         # TODO support archives
         spectra = files_rdd.map(lambda x: parse_spectra_file(x[0])).cache()
-        low, high = spectra.aggregate((0.0, sys.float_info.max), high_low_op, high_low_comb)
+        low, high = spectra.union(labeled_spectra.map(lambda x: x.drop(x.columns[-1], axis=1))).aggregate((0.0, sys.float_info.max), high_low_op, high_low_comb)
         mean_step = spectra.map(lambda x: x.columns[1] - x.columns[0]).mean()
         self.logger.debug("low %f high %f %f", low, high, mean_step)
         spectra = spectra.map(lambda x: self.resample(x, low=low, high=high, step=mean_step)).cache()
@@ -93,5 +95,7 @@ class Preprocessing(object):
             spectra = spectra.map(lambda x: x.assign(label=pd.Series([-1], index=x.index)))
         if labeled_spectra is not None:
             spectra = labeled_spectra.map(lambda x: self.resample(x, low=low, high=high, step=mean_step,
-                                                                  label_col="label" if label else None)).union(spectra)
+                                                                  label_col="label" if label else None,
+                                                                  convolve=True)).union(spectra).\
+                sortBy(lambda x: x['label'].values[0], ascending=False)
         return spectra
