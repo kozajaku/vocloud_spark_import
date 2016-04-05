@@ -8,5 +8,11 @@ setup(
         license='MIT',
         author='Andrej Palicka',
         author_email='andrej.palicka@gmail.com',
-        description=''
+        description='',
+        install_requires=[
+            'numpy',
+            'pandas',
+            'scikit-learn',
+            'astropy'
+        ]
 )
