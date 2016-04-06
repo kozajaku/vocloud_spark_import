@@ -1,7 +1,18 @@
-import os
 import sys
+# fix for spark py-files zip containig dynamic libraries like .so
+dep_zip_list = [i for i, val in enumerate(sys.path) if val.endswith("dependencies.zip")]
+if len(dep_zip_list) > 0:
+    import zipfile
+    import tempfile
+    dep_zip = sys.path[dep_zip_list[0]]
+    out_dir = tempfile.mkdtemp()
+    with open(dep_zip, 'rb') as dep_zip_file:
+        z = zipfile.ZipFile(dep_zip_file)
+        for name in z.namelist():
+            z.extract(name, out_dir)
+    sys.path.insert(0, out_dir)
+import os
 import argparse
-
 import pandas as pd
 #import matplotlib.pyplot as plt
 import vocloud_spark_preprocess.preprocess_data as prep
