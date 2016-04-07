@@ -8,7 +8,7 @@ import os
 import pandas as pd
 import sys
 import xml.etree.ElementTree as ET
-
+import StringIO
 
 __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
@@ -59,22 +59,24 @@ def resample(spectrum, low, high, step, label_col=None, convolve=False):
     return interpolated_df
 
 
-def parse_fits(path):
-    hdu = pyfits.open(path)[0]
-    crval1, crpix1 = hdu.header["CRVAL1"], hdu.header["CRPIX1"]
-    cdelt1 = hdu.header["CD1_1"]
-    name = os.path.basename(os.path.splitext(path)[0])
-    def specTrans(pixNo):
-        return 10**(crval1+(pixNo+1-crpix1)*cdelt1)
+def parse_fits(path, content):
+    str_file = StringIO.StringIO(content)
+    with pyfits.open(str_file) as hdu_list:
+        hdu = hdu_list[0]
+        crval1, crpix1 = hdu.header["CRVAL1"], hdu.header["CRPIX1"]
+        cdelt1 = hdu.header["CD1_1"]
+        name = os.path.basename(os.path.splitext(path)[0])
+        def specTrans(pixNo):
+            return 10**(crval1+(pixNo+1-crpix1)*cdelt1)
 
-    return pd.DataFrame.from_records({specTrans(spec): flux for spec, flux in enumerate(hdu.data[2])}, index=[name])
+        return pd.DataFrame.from_records({specTrans(spec): flux for spec, flux in enumerate(hdu.data[2])}, index=[name])
 
 def parse_spectra_file(file_path, content):
     ext = os.path.splitext(file_path)[1]
     if ext == ".vot":
         return parse_votable(file_path, content)
     elif ext == ".fits":
-        return parse_fits(file_path)
+        return parse_fits(file_path, content)
     else:
         raise ValueError("Only votable and fits files are supported for now")
 

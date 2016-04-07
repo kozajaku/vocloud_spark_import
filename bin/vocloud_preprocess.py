@@ -54,7 +54,10 @@ def main(argv):
     sc = SparkContext(conf=spark_conf)
     with open(parsed_args.config) as in_config:
         preprocess_conf = json.load(in_config)
-    files = sc.wholeTextFiles(preprocess_conf["input"])
+    if preprocess_conf.get("binary_input", True):
+        files = sc.binaryFiles(preprocess_conf["input"])
+    else:
+        files = sc.wholeTextFiles(preprocess_conf["input"])
     metadata = parse_metadata(preprocess_conf["labeled"]["metadata"])
     labeled = sc.textFile(preprocess_conf["labeled"]["file"]).map(lambda x: parse_labeled_line(x, metadata, True)).cache()
     resampled = prep.preprocess(files, labeled).cache()
