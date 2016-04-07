@@ -2,6 +2,7 @@ import logging
 import warnings
 import numpy as np
 import astropy.io.votable as vo
+import astropy.io.fits as pyfits
 import astropy.convolution as convolution
 import os
 import pandas as pd
@@ -14,11 +15,12 @@ __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
 logger = logging.getLogger("py4j")
 
-def parse_votable( name, content):
+def parse_votable(file_path, content):
     """
     :param file: The file to parse
     :return: Returns a pandas Series, where the index are the waves and values are intensities
     """
+    name = os.path.basename(os.path.splitext(file_path)[0])
     tree = ET.fromstring(content)
     spectral_col = []
     flux_col = []
@@ -57,11 +59,24 @@ def resample(spectrum, low, high, step, label_col=None, convolve=False):
     return interpolated_df
 
 
+def parse_fits(path):
+    hdu = pyfits.open(path)[0]
+    crval1, crpix1 = hdu.header["CRVAL1"], hdu.header["CRPIX1"]
+    cdelt1 = hdu.header["CD1_1"]
+    name = os.path.basename(os.path.splitext(path)[0])
+    def specTrans(pixNo):
+        return 10**(crval1+(pixNo+1-crpix1)*cdelt1)
+
+    return pd.DataFrame.from_records({specTrans(spec): flux for spec, flux in enumerate(hdu.data[2])}, index=[name])
+
 def parse_spectra_file(file_path, content):
-    if os.path.splitext(file_path)[1] == ".vot":
-        return parse_votable(os.path.basename(os.path.splitext(file_path)[0]), content)
+    ext = os.path.splitext(file_path)[1]
+    if ext == ".vot":
+        return parse_votable(file_path, content)
+    elif ext == ".fits":
+        return parse_fits(file_path)
     else:
-        raise ValueError("Only votable files are supported for now")
+        raise ValueError("Only votable and fits files are supported for now")
 
 
 def high_low_op(acc, x):
