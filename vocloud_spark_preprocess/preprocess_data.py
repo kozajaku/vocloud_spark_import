@@ -1,14 +1,12 @@
 import logging
 import warnings
 import numpy as np
-import astropy.io.votable as vo
-import astropy.io.fits as pyfits
-import astropy.convolution as convolution
 import os
-import pandas as pd
 import sys
 import xml.etree.ElementTree as ET
 import StringIO
+import vocloud_spark_preprocess.util as utils
+
 
 __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
@@ -20,6 +18,11 @@ def parse_votable(file_path, content):
     :param file: The file to parse
     :return: Returns a pandas Series, where the index are the waves and values are intensities
     """
+    try:
+        import pandas as pd
+    except:
+        utils.add_dependencies()
+        import pandas as pd
     name = os.path.basename(os.path.splitext(file_path)[0])
     tree = ET.fromstring(content)
     spectral_col = []
@@ -39,6 +42,13 @@ def parse_votable(file_path, content):
 def resample(spectrum, low, high, step, label_col=None, convolve=False):
     """Resamples the spectrum so that the x-axis starts at low and ends at high, while
     keeping the delta between the wavelengths"""
+    try:
+        import astropy.convolution as convolution
+        import pandas as pd
+    except ImportError:
+        utils.add_dependencies()
+        import astropy.convolution as convolution
+        import pandas as pd
     resampled_header = np.arange(low, high, step)
     if label_col is not None:
         logger.debug(spectrum.columns)
@@ -60,6 +70,13 @@ def resample(spectrum, low, high, step, label_col=None, convolve=False):
 
 
 def parse_fits(path, content):
+    try:
+        import astropy.io.fits as pyfits
+        import pandas as pd
+    except ImportError:
+        utils.add_dependencies()
+        import astropy.io.fits as pyfits
+        import pandas as pd
     str_file = StringIO.StringIO(content)
     with pyfits.open(str_file) as hdu_list:
         hdu = hdu_list[0]
@@ -104,7 +121,11 @@ def preprocess(files_rdd, labeled_spectra, label=True):
     shall not contain any label and the ordering shall be arbitrary.
     """
     logger.info("Starting preprocessing")
-
+    try:
+        import pandas as pd
+    except ImportError:
+        utils.add_dependencies()
+        import pandas as pd
     # TODO support archives
     spectra = files_rdd.map(lambda x: parse_spectra_file(x[0], x[1])).cache()
     low, high = spectra.union(labeled_spectra.map(lambda x: x.drop(x.columns[-1], axis=1))).aggregate((0.0, sys.float_info.max), high_low_op, high_low_comb)

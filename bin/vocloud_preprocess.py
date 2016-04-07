@@ -1,22 +1,23 @@
 import os
 import sys
 import argparse
-
 import pandas as pd
 import vocloud_spark_preprocess.preprocess_data as prep
+import vocloud_spark_preprocess.util as utils
 import logging
 import logging.config
-from astropy.io.votable import parse
 from pyspark import SparkConf, SparkContext
 import json
 
 
 __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
-BASE_URL = "http://vos2.asu.cas.cz/lamost_dr3/q/sdl/dlget"
-
 
 def parse_metadata(metadata_file):
+    try:
+        from astropy.io.votable import parse
+    except ImportError:
+        utils.add_dependencies()
     metadata = parse(metadata_file)
     return metadata.get_first_table().to_table().to_pandas()["intensities"].iloc[0]
 
