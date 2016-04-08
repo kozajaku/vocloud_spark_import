@@ -20,7 +20,7 @@ def parse_votable(file_path, content):
     """
     try:
         import pandas as pd
-    except:
+    except ImportError:
         utils.add_dependencies()
         import pandas as pd
     name = os.path.basename(os.path.splitext(file_path)[0])

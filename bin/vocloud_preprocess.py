@@ -1,7 +1,6 @@
 import os
 import sys
 import argparse
-import pandas as pd
 import vocloud_spark_preprocess.preprocess_data as prep
 import vocloud_spark_preprocess.util as utils
 import logging
@@ -23,6 +22,11 @@ def parse_metadata(metadata_file):
 
 
 def parse_labeled_line(line, metadata, has_class):
+    try:
+        import pandas as pd
+    except:
+        utils.add_dependencies()
+        import pandas as pd
     line_elements = [num.strip(" ") for num in line.split(",")]
     name = line_elements[0]
     if has_class:
