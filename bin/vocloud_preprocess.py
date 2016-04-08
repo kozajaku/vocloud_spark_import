@@ -1,6 +1,9 @@
 import os
 import sys
 import argparse
+from astropy.io.votable import parse
+import pandas as pd
+
 import vocloud_spark_preprocess.preprocess_data as prep
 import vocloud_spark_preprocess.util as utils
 import logging
@@ -13,20 +16,11 @@ __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
 
 def parse_metadata(metadata_file):
-    try:
-        from astropy.io.votable import parse
-    except ImportError:
-        utils.add_dependencies()
     metadata = parse(metadata_file)
     return metadata.get_first_table().to_table().to_pandas()["intensities"].iloc[0]
 
 
 def parse_labeled_line(line, metadata, has_class):
-    try:
-        import pandas as pd
-    except:
-        utils.add_dependencies()
-        import pandas as pd
     line_elements = [num.strip(" ") for num in line.split(",")]
     name = line_elements[0]
     if has_class:
@@ -60,9 +54,9 @@ def main(argv):
     with open(parsed_args.config) as in_config:
         preprocess_conf = json.load(in_config)
     if preprocess_conf.get("binary_input", True):
-        files = sc.binaryFiles(preprocess_conf["input"])
+        files = sc.binaryFiles(preprocess_conf["input"], preprocess_conf.get('partitions', 4000))
     else:
-        files = sc.wholeTextFiles(preprocess_conf["input"])
+        files = sc.wholeTextFiles(preprocess_conf["input"], preprocess_conf.get('partitions', 4000))
     metadata = parse_metadata(preprocess_conf["labeled"]["metadata"])
     labeled = sc.textFile(preprocess_conf["labeled"]["file"]).map(lambda x: parse_labeled_line(x, metadata, True)).cache()
     resampled = prep.preprocess(files, labeled).cache()
