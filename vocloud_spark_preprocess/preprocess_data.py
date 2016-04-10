@@ -9,7 +9,9 @@ import StringIO
 import vocloud_spark_preprocess.util as utils
 import pandas as pd
 import astropy.io.fits as pyfits
-
+from pyspark.mllib.feature import PCA
+from pyspark.mllib.regression import LabeledPoint
+from pyspark.mllib.linalg import Vectors
 
 __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
@@ -94,7 +96,14 @@ def high_low_comb(acc1, acc2):
     return w_low, w_high
 
 
-def preprocess(files_rdd, labeled_spectra, label=True):
+def transform_pca(x):
+    columns = x.columns
+    if x.columns[-1] == 'label':
+        columns = columns[:-1]
+    return x[columns].iloc[0].values
+
+
+def preprocess(files_rdd, labeled_spectra, label=True, **kwargs):
     """
     :param path: A path to the input data. It should be a directory containing the votable or FITS files.
     :param labeled_path: A path to the CSV file with spectra already labeled. These shall be resampled so that
@@ -113,9 +122,26 @@ def preprocess(files_rdd, labeled_spectra, label=True):
     spectra = spectra.map(lambda x: resample(x, low=low, high=high, step=mean_step)).cache()
     if label:
         spectra = spectra.map(lambda x: x.assign(label=pd.Series([-1], index=x.index)))
+
     if labeled_spectra is not None:
         spectra = labeled_spectra.map(lambda x: resample(x, low=low, high=high, step=mean_step,
                                                               label_col="label" if label else None,
-                                                              convolve=True)).union(spectra).\
-            sortBy(lambda x: x['label'].values[0], ascending=False)
-    return spectra
+                                                              convolve=True)).union(spectra).coalesce(spectra.getNumPartitions())
+
+    if kwargs.get('pca') is not None:
+        namesByRow = spectra.zipWithIndex().map(lambda s: (s[1], (s[0].index, s[0]['label'].iloc[0])) if label else (s[1], s[0].index))
+        logger.info("Doing PCA")
+        pca_params = kwargs['pca']
+        k = pca_params.get("k", 10)
+        pca = PCA(k)
+        fitted_pca = pca.fit(spectra.map(lambda x: Vectors.dense(x[x.columns[:-1]].iloc[0].values)))
+        transformed_spectra = fitted_pca.transform(spectra.
+                                       map(lambda x: transform_pca(x))).zipWithIndex(). \
+            map(lambda x: (x[1], x[0])).join(namesByRow)
+        spectra = transformed_spectra.map(lambda x: pd.DataFrame(data=[x[1][0].tolist() +
+                                       ([x[1][1][1]] if label else [])],
+                                       index=x[1][1][0] if label else x[2],
+                                       columns=range(k) + ['label'] if label else range(k)))
+
+    print(spectra.map(lambda x: x['label']).take(10))
+    return spectra.sortBy(lambda x: x['label'].values[0], ascending=False)
