@@ -71,7 +71,6 @@ def parse_fits(path, content):
         name = os.path.basename(os.path.splitext(path)[0])
         def specTrans(pixNo):
             return 10**(crval1+(pixNo+1-crpix1)*cdelt1)
-
         return pd.DataFrame.from_records({specTrans(spec): flux for spec, flux in enumerate(hdu.data[2])}, index=[name])
 
 def parse_spectra_file(file_path, content):
@@ -119,7 +118,7 @@ def preprocess(files_rdd, labeled_spectra, label=True, **kwargs):
     low, high = spectra.union(labeled_spectra.map(lambda x: x.drop(x.columns[-1], axis=1))).aggregate((0.0, sys.float_info.max), high_low_op, high_low_comb)
     mean_step = spectra.map(lambda x: x.columns[1] - x.columns[0]).mean()
     logger.debug("low %f high %f %f", low, high, mean_step)
-    spectra = spectra.map(lambda x: resample(x, low=low, high=high, step=mean_step)).cache()
+    spectra = spectra.map(lambda x: resample(x, low=low, high=high, step=mean_step))
     if label:
         spectra = spectra.map(lambda x: x.assign(label=pd.Series([-1], index=x.index)))
 
@@ -143,5 +142,4 @@ def preprocess(files_rdd, labeled_spectra, label=True, **kwargs):
                                        index=x[1][1][0] if label else x[2],
                                        columns=range(k) + ['label'] if label else range(k)))
 
-    print(spectra.map(lambda x: x['label']).take(10))
-    return spectra.sortBy(lambda x: x['label'].values[0], ascending=False)
+    return np.arange(low, high, mean_step), spectra.sortBy(lambda x: x['label'].values[0], ascending=False)
