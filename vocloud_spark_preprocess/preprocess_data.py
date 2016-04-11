@@ -66,6 +66,8 @@ def parse_fits(path, content):
     str_file = StringIO.StringIO(content)
     with pyfits.open(str_file) as hdu_list:
         hdu = hdu_list[0]
+        if hdu.header["CLASS"].lower() != "star":
+            return None
         crval1, crpix1 = hdu.header["CRVAL1"], hdu.header["CRPIX1"]
         cdelt1 = hdu.header["CD1_1"]
         name = os.path.basename(os.path.splitext(path)[0])
@@ -114,7 +116,7 @@ def preprocess(files_rdd, labeled_spectra, label=True, **kwargs):
     """
     logger.info("Starting preprocessing")
     # TODO support archives
-    spectra = files_rdd.map(lambda x: parse_spectra_file(x[0], x[1])).cache()
+    spectra = files_rdd.map(lambda x: parse_spectra_file(x[0], x[1])).filter(lambda x: x is not None).cache()
     low, high = spectra.union(labeled_spectra.map(lambda x: x.drop(x.columns[-1], axis=1))).aggregate((0.0, sys.float_info.max), high_low_op, high_low_comb)
     mean_step = spectra.map(lambda x: x.columns[1] - x.columns[0]).mean()
     logger.debug("low %f high %f %f", low, high, mean_step)
