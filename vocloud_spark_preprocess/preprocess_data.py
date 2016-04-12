@@ -122,12 +122,12 @@ def preprocess(sc, files_rdd, labeled_spectra, label=True, **kwargs):
     logger.debug("low %f high %f %f", low, high, mean_step)
     resampled_header = sc.broadcast(np.arange(low, high, mean_step))
 
-    spectra = spectra.map(lambda x: resample(x, resampled_header=resampled_header))
+    spectra = spectra.map(lambda x: resample(x, resampled_header_broadcast=resampled_header))
     if label:
         spectra = spectra.map(lambda x: x.assign(label=pd.Series([-1], index=x.index)))
 
     if labeled_spectra is not None:
-        spectra = labeled_spectra.map(lambda x: resample(x, resampled_header, label_col="label" if label else None,
+        spectra = labeled_spectra.map(lambda x: resample(x, resampled_header_broadcast=resampled_header, label_col="label" if label else None,
                                                          convolve=True)).union(spectra)
 
     if kwargs.get('pca') is not None:
