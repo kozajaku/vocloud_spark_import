@@ -60,7 +60,7 @@ def main(argv):
     metadata = parse_metadata(preprocess_conf["labeled"]["metadata"])
     labeled = sc.textFile(preprocess_conf["labeled"]["file"], preprocess_conf.get('partitions', 4000)).\
                           map(lambda x: parse_labeled_line(x, metadata, True)).cache()
-    header, resampled = prep.preprocess(files, labeled, label=preprocess_conf.get('label', True),
+    header, resampled = prep.preprocess(sc, files, labeled, label=preprocess_conf.get('label', True),
                                 pca=preprocess_conf.get("pca", None))
     resampled.map(lambda x: x.to_csv(None, header=None).rstrip("\n")).saveAsTextFile(preprocess_conf["output"])
     #os.rename("out/part-00000", preprocess_conf["output"])

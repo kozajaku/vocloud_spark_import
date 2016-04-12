@@ -39,10 +39,10 @@ def parse_votable(file_path, content):
     logger.debug(series)
     return series
 
-def resample(spectrum, low, high, step, label_col=None, convolve=False):
+def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=False):
     """Resamples the spectrum so that the x-axis starts at low and ends at high, while
     keeping the delta between the wavelengths"""
-    resampled_header = np.arange(low, high, step)
+    resampled_header = resampled_header_broadcast.value
     if label_col is not None:
         logger.debug(spectrum.columns)
         without_label = spectrum.drop(label_col, axis=1)
@@ -104,7 +104,7 @@ def transform_pca(x):
     return x[columns].iloc[0].values
 
 
-def preprocess(files_rdd, labeled_spectra, label=True, **kwargs):
+def preprocess(sc, files_rdd, labeled_spectra, label=True, **kwargs):
     """
     :param path: A path to the input data. It should be a directory containing the votable or FITS files.
     :param labeled_path: A path to the CSV file with spectra already labeled. These shall be resampled so that
@@ -120,14 +120,15 @@ def preprocess(files_rdd, labeled_spectra, label=True, **kwargs):
     low, high = spectra.union(labeled_spectra.map(lambda x: x.drop(x.columns[-1], axis=1))).aggregate((0.0, sys.float_info.max), high_low_op, high_low_comb)
     mean_step = spectra.map(lambda x: x.columns[1] - x.columns[0]).mean()
     logger.debug("low %f high %f %f", low, high, mean_step)
-    spectra = spectra.map(lambda x: resample(x, low=low, high=high, step=mean_step))
+    resampled_header = sc.broadcast(np.arange(low, high, mean_step))
+
+    spectra = spectra.map(lambda x: resample(x, resampled_header=resampled_header))
     if label:
         spectra = spectra.map(lambda x: x.assign(label=pd.Series([-1], index=x.index)))
 
     if labeled_spectra is not None:
-        spectra = labeled_spectra.map(lambda x: resample(x, low=low, high=high, step=mean_step,
-                                                              label_col="label" if label else None,
-                                                              convolve=True)).union(spectra).coalesce(spectra.getNumPartitions())
+        spectra = labeled_spectra.map(lambda x: resample(x, resampled_header, label_col="label" if label else None,
+                                                         convolve=True)).union(spectra)
 
     if kwargs.get('pca') is not None:
         namesByRow = spectra.zipWithIndex().map(lambda s: (s[1], (s[0].index, s[0]['label'].iloc[0])) if label else (s[1], s[0].index))
@@ -144,4 +145,4 @@ def preprocess(files_rdd, labeled_spectra, label=True, **kwargs):
                                        index=x[1][1][0] if label else x[2],
                                        columns=range(k) + ['label'] if label else range(k)))
 
-    return np.arange(low, high, mean_step), spectra.sortBy(lambda x: x['label'].values[0], ascending=False)
+    return resampled_header.value, spectra.sortBy(lambda x: x['label'].values[0], ascending=False)
