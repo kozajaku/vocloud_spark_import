@@ -57,6 +57,7 @@ def main(argv):
         files = sc.binaryFiles(preprocess_conf["input"], preprocess_conf.get('partitions', 4000))
     else:
         files = sc.wholeTextFiles(preprocess_conf["input"], preprocess_conf.get('partitions', 4000))
+    files.repartition(preprocess_conf.get('partitions', 4000))
     metadata = parse_metadata(preprocess_conf["labeled"]["metadata"])
     labeled = sc.textFile(preprocess_conf["labeled"]["file"], preprocess_conf.get('partitions', 4000)).\
                           map(lambda x: parse_labeled_line(x, metadata, True)).cache()

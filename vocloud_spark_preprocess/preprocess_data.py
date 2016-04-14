@@ -18,6 +18,11 @@ __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
 logger = logging.getLogger("py4j")
 
+def normalized(a, axis=-1, order=2):
+    l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
+    l2[l2==0] = 1
+    return a / np.expand_dims(l2, axis)
+
 def parse_votable(file_path, content):
     """
     :param file: The file to parse
@@ -39,7 +44,7 @@ def parse_votable(file_path, content):
     logger.debug(series)
     return series
 
-def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=False):
+def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=False, normalize=True):
     """Resamples the spectrum so that the x-axis starts at low and ends at high, while
     keeping the delta between the wavelengths"""
     resampled_header = resampled_header_broadcast.value
@@ -55,6 +60,8 @@ def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=Fals
         to_interpolate = without_label.iloc[0].values
     logger.debug(without_label)
     interpolated = np.interp(resampled_header, without_label.columns.values, to_interpolate, left=0.0, right=0.0)
+    if normalize:
+        interpolated = normalized(interpolated)
     logger.debug("Interpolated:%s", interpolated)
     interpolated_df = pd.DataFrame(data=[interpolated], columns=resampled_header, index=[spectrum.index.values])
     if label_col is not None:
@@ -62,7 +69,7 @@ def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=Fals
     return interpolated_df
 
 
-def parse_fits(path, content):
+def parse_fits(path, content, low, high):
     str_file = StringIO.StringIO(content)
     with pyfits.open(str_file) as hdu_list:
         hdu = hdu_list[0]
@@ -73,14 +80,14 @@ def parse_fits(path, content):
         name = os.path.basename(os.path.splitext(path)[0])
         def specTrans(pixNo):
             return 10**(crval1+(pixNo+1-crpix1)*cdelt1)
-        return pd.DataFrame.from_records({specTrans(spec): flux for spec, flux in enumerate(hdu.data[2])}, index=[name])
+        return pd.DataFrame.from_records({specTrans(spec): flux for spec, flux in enumerate(hdu.data[2]) if low < spec < high}, index=[name])
 
-def parse_spectra_file(file_path, content):
+def parse_spectra_file(file_path, content, low, high):
     ext = os.path.splitext(file_path)[1]
     if ext == ".vot":
         return parse_votable(file_path, content)
     elif ext == ".fits":
-        return parse_fits(file_path, content)
+        return parse_fits(file_path, content, low, high)
     else:
         raise ValueError("Only votable and fits files are supported for now")
 
@@ -104,7 +111,7 @@ def transform_pca(x):
     return x[columns].iloc[0].values
 
 
-def preprocess(sc, files_rdd, labeled_spectra, label=True, **kwargs):
+def preprocess(sc, files_rdd, labeled_spectra, cut, label=True, **kwargs):
     """
     :param path: A path to the input data. It should be a directory containing the votable or FITS files.
     :param labeled_path: A path to the CSV file with spectra already labeled. These shall be resampled so that
@@ -116,12 +123,13 @@ def preprocess(sc, files_rdd, labeled_spectra, label=True, **kwargs):
     """
     logger.info("Starting preprocessing")
     # TODO support archives
-    spectra = files_rdd.map(lambda x: parse_spectra_file(x[0], x[1])).filter(lambda x: x is not None).cache()
+    cut_low = cut['low']
+    cut_high = cut['high']
+    spectra = files_rdd.map(lambda x: parse_spectra_file(x[0], x[1], cut_low, cut_high)).filter(lambda x: x is not None).map.cache()
     low, high = spectra.union(labeled_spectra.map(lambda x: x.drop(x.columns[-1], axis=1))).aggregate((0.0, sys.float_info.max), high_low_op, high_low_comb)
     mean_step = spectra.map(lambda x: x.columns[1] - x.columns[0]).mean()
     logger.debug("low %f high %f %f", low, high, mean_step)
     resampled_header = sc.broadcast(np.arange(low, high, mean_step))
-
     spectra = spectra.map(lambda x: resample(x, resampled_header_broadcast=resampled_header))
     if label:
         spectra = spectra.map(lambda x: x.assign(label=pd.Series([-1], index=x.index)))
