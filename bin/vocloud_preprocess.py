@@ -26,7 +26,8 @@ def parse_labeled_line(line, metadata, has_class):
     if has_class:
         numbers = [float(num) for num in line_elements[1:-1]]
         header = list(metadata) + ["label"]
-        numbers.append(int(line_elements[-1]))
+        label = int(line_elements[-1])
+        numbers.append(label)
     else:
         numbers = [float(num) for num in line_elements[1:]]
         header = list(metadata)
@@ -46,6 +47,14 @@ def parse_args(argv):
 #            spectrum.iloc[0].plot()
 #            plt.savefig(out_folder + "/" + spectrum.index[0] + ".png")
 
+
+def transform_labels(df):
+    copy = df.copy()
+    if copy.iloc[0]["label"] == 2:
+        return copy.set_value(df.iloc[0].name, "label", 0)
+    else:
+        return copy.set_value(df.iloc[0].name, "label", 1)
+
 def main(argv):
     logging.config.fileConfig(os.path.join(os.path.dirname(os.path.realpath(__file__)), "logging.ini"))
     parsed_args = parse_args(argv)
@@ -60,9 +69,10 @@ def main(argv):
     files.repartition(preprocess_conf.get('partitions', 4000))
     metadata = parse_metadata(preprocess_conf["labeled"]["metadata"])
     labeled = sc.textFile(preprocess_conf["labeled"]["file"], preprocess_conf.get('partitions', 4000)).\
-                          map(lambda x: parse_labeled_line(x, metadata, True)).cache()
+                          map(lambda x: parse_labeled_line(x, metadata, True)).filter(lambda x: x.iloc[0]["label"] != 4).map(transform_labels)
     header, resampled = prep.preprocess(sc, files, labeled, label=preprocess_conf.get('label', True),
-                                pca=preprocess_conf.get("pca", None))
+                                        cut=preprocess_conf.get("cut", {"low": 6300, "high": 6700}),
+                                pca=preprocess_conf.get("pca", None), partitions=preprocess_conf.get('partitions', 100))
     resampled.map(lambda x: x.to_csv(None, header=None).rstrip("\n")).saveAsTextFile(preprocess_conf["output"])
     #os.rename("out/part-00000", preprocess_conf["output"])
 #    if preprocess_conf["plot"]:

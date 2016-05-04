@@ -16,7 +16,7 @@ from pyspark.mllib.linalg import Vectors
 __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
 
-logger = logging.getLogger("py4j")
+logger = logging.getLogger(__name__)
 
 def normalized(a, axis=-1, order=2):
     l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
@@ -59,11 +59,11 @@ def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=Fals
     else:
         to_interpolate = without_label.iloc[0].values
     logger.debug(without_label)
-    interpolated = np.interp(resampled_header, without_label.columns.values, to_interpolate, left=0.0, right=0.0)
+    interpolated = np.interp(resampled_header, without_label.columns.values, to_interpolate)
     if normalize:
         interpolated = normalized(interpolated)
     logger.debug("Interpolated:%s", interpolated)
-    interpolated_df = pd.DataFrame(data=[interpolated], columns=resampled_header, index=[spectrum.index.values])
+    interpolated_df = pd.DataFrame(data=interpolated, columns=resampled_header, index=spectrum.index.values)
     if label_col is not None:
         interpolated_df[label_col] = spectrum[label_col]
     return interpolated_df
@@ -80,7 +80,7 @@ def parse_fits(path, content, low, high):
         name = os.path.basename(os.path.splitext(path)[0])
         def specTrans(pixNo):
             return 10**(crval1+(pixNo+1-crpix1)*cdelt1)
-        return pd.DataFrame.from_records({specTrans(spec): flux for spec, flux in enumerate(hdu.data[2]) if low < spec < high}, index=[name])
+        return pd.DataFrame.from_records({specTrans(spec): flux for spec, flux in enumerate(hdu.data[2]) if low < specTrans(spec) < high}, index=[name])
 
 def parse_spectra_file(file_path, content, low, high):
     ext = os.path.splitext(file_path)[1]
@@ -93,7 +93,7 @@ def parse_spectra_file(file_path, content, low, high):
 
 
 def high_low_op(acc, x):
-    logger.debug(x)
+    logger.info(x)
     w_low = max(acc[0], x.columns[0])
     w_high = min(acc[1], x.columns[-1])
     return w_low, w_high
@@ -125,7 +125,7 @@ def preprocess(sc, files_rdd, labeled_spectra, cut, label=True, **kwargs):
     # TODO support archives
     cut_low = cut['low']
     cut_high = cut['high']
-    spectra = files_rdd.map(lambda x: parse_spectra_file(x[0], x[1], cut_low, cut_high)).filter(lambda x: x is not None).map.cache()
+    spectra = files_rdd.map(lambda x: parse_spectra_file(x[0], x[1], cut_low, cut_high)).filter(lambda x: x is not None).cache()
     low, high = spectra.union(labeled_spectra.map(lambda x: x.drop(x.columns[-1], axis=1))).aggregate((0.0, sys.float_info.max), high_low_op, high_low_comb)
     mean_step = spectra.map(lambda x: x.columns[1] - x.columns[0]).mean()
     logger.debug("low %f high %f %f", low, high, mean_step)
@@ -136,9 +136,10 @@ def preprocess(sc, files_rdd, labeled_spectra, cut, label=True, **kwargs):
 
     if labeled_spectra is not None:
         spectra = labeled_spectra.map(lambda x: resample(x, resampled_header_broadcast=resampled_header, label_col="label" if label else None,
-                                                         convolve=True)).union(spectra)
+                                                         convolve=True)).union(spectra).repartition(kwargs.get("partitions", 100))
 
     if kwargs.get('pca') is not None:
+        distributed_df = sc.createDataFrame()
         namesByRow = spectra.zipWithIndex().map(lambda s: (s[1], (s[0].index, s[0]['label'].iloc[0])) if label else (s[1], s[0].index))
         logger.info("Doing PCA")
         pca_params = kwargs['pca']
@@ -153,4 +154,5 @@ def preprocess(sc, files_rdd, labeled_spectra, cut, label=True, **kwargs):
                                        index=x[1][1][0] if label else x[2],
                                        columns=range(k) + ['label'] if label else range(k)))
 
-    return resampled_header.value, spectra.sortBy(lambda x: x['label'].values[0], ascending=False)
+    return resampled_header.value, spectra.sortBy(lambda x: x['label'].values[0], ascending=False,
+                                                  numPartitions=kwargs.get("partitions", 100))
