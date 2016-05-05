@@ -139,7 +139,6 @@ def preprocess(sc, files_rdd, labeled_spectra, cut, label=True, **kwargs):
                                                          convolve=True)).union(spectra).repartition(kwargs.get("partitions", 100))
 
     if kwargs.get('pca') is not None:
-        distributed_df = sc.createDataFrame()
         namesByRow = spectra.zipWithIndex().map(lambda s: (s[1], (s[0].index, s[0]['label'].iloc[0])) if label else (s[1], s[0].index))
         logger.info("Doing PCA")
         pca_params = kwargs['pca']
