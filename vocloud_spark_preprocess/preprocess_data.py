@@ -12,6 +12,8 @@ import astropy.io.fits as pyfits
 from pyspark.mllib.feature import PCA
 from pyspark.mllib.regression import LabeledPoint
 from pyspark.mllib.linalg import Vectors
+import sklearn.preprocessing as prep
+
 
 __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
@@ -61,7 +63,7 @@ def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=Fals
     logger.debug(without_label)
     interpolated = np.interp(resampled_header, without_label.columns.values, to_interpolate)
     if normalize:
-        interpolated = normalized(interpolated)
+            interpolated = prep.minmax_scale([interpolated], axis=1)
     logger.debug("Interpolated:%s", interpolated)
     interpolated_df = pd.DataFrame(data=interpolated, columns=resampled_header, index=spectrum.index.values)
     if label_col is not None:
