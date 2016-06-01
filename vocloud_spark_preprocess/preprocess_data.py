@@ -57,15 +57,17 @@ def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=Fals
     else:
         without_label = spectrum
     if convolve:
-        to_interpolate = convolution.convolve(without_label.iloc[0].values, convolution.Gaussian1DKernel(7))
+        to_interpolate = convolution.convolve(without_label.iloc[0].values, convolution.Gaussian1DKernel(7),
+                                              boundary="extend")
     else:
         to_interpolate = without_label.iloc[0].values
     logger.debug(without_label)
     interpolated = np.interp(resampled_header, without_label.columns.values, to_interpolate)
+    interpolated = interpolated[3:-3]  # remove some weird artefacts that might happen because of convo/interpolation
     if normalize:
             interpolated = prep.minmax_scale([interpolated], axis=1)
     logger.debug("Interpolated:%s", interpolated)
-    interpolated_df = pd.DataFrame(data=interpolated, columns=resampled_header, index=spectrum.index.values)
+    interpolated_df = pd.DataFrame(data=interpolated, columns=resampled_header[3:-3], index=spectrum.index.values)
     if label_col is not None:
         interpolated_df[label_col] = spectrum[label_col]
     return interpolated_df
