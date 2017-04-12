@@ -66,7 +66,7 @@ def main(argv):
         # binary files saved inside avro format
         sql_context = SQLContext(sc)  # requires parameter --packages com.databricks:spark-avro_2.10:2.0.1
         input = preprocess_conf["input"]
-        if not input.endswith("*.avro"):
+        if not input.endswith(".avro"):
             input = os.path.join(input, "*.avro")
         df = sql_context.read.format("com.databricks.spark.avro").load(input)
         files = df.rdd
