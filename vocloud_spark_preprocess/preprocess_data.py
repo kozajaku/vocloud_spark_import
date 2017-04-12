@@ -134,13 +134,13 @@ def preprocess(sc, files_rdd, labeled_spectra, cut, label=True, **kwargs):
     mean_step = spectra.map(lambda x: x.columns[1] - x.columns[0]).mean()
     logger.debug("low %f high %f %f", low, high, mean_step)
     resampled_header = sc.broadcast(np.arange(low, high, mean_step))
-    spectra = spectra.map(lambda x: resample(x, resampled_header_broadcast=resampled_header))
+    spectra = spectra.map(lambda x: resample(x, resampled_header_broadcast=resampled_header, normalize=kwargs.get('minmax_scale')))
     if label:
         spectra = spectra.map(lambda x: x.assign(label=pd.Series([-1], index=x.index)))
 
     if labeled_spectra is not None:
         spectra = labeled_spectra.map(lambda x: resample(x, resampled_header_broadcast=resampled_header, label_col="label" if label else None,
-                                                         convolve=True)).union(spectra).repartition(kwargs.get("partitions", 100))
+                                                         convolve=True, normalize=kwargs.get('minmax_scale'))).union(spectra).repartition(kwargs.get("partitions", 100))
 
     if kwargs.get('pca') is not None:
         namesByRow = spectra.zipWithIndex().map(lambda s: (s[1], (s[0].index, s[0]['label'].iloc[0])) if label else (s[1], s[0].index))

@@ -83,7 +83,8 @@ def main(argv):
     header, resampled = prep.preprocess(sc, files, labeled, label=preprocess_conf.get('label', True),
                                         cut=preprocess_conf.get("cut", {"low": 6300, "high": 6700}),
                                         pca=preprocess_conf.get("pca", None),
-                                        partitions=preprocess_conf.get('partitions', 100))
+                                        partitions=preprocess_conf.get('partitions', 100),
+                                        minmax_scale=preprocess_conf.get('minmax_scale', False))
     resampled.map(lambda x: x.to_csv(None, header=None).rstrip("\n")).saveAsTextFile(preprocess_conf["output"])
     # os.rename("out/part-00000", preprocess_conf["output"])
 
