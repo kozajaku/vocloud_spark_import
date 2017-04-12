@@ -1,12 +1,10 @@
 import logging
-import warnings
 import astropy.convolution as convolution
 import numpy as np
 import os
 import sys
 import xml.etree.ElementTree as ET
 import StringIO
-import vocloud_spark_preprocess.util as utils
 import pandas as pd
 import astropy.io.fits as pyfits
 from pyspark.mllib.feature import PCA
@@ -14,16 +12,16 @@ from pyspark.mllib.regression import LabeledPoint
 from pyspark.mllib.linalg import Vectors
 import sklearn.preprocessing as prep
 
-
 __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
-
 
 logger = logging.getLogger(__name__)
 
+
 def normalized(a, axis=-1, order=2):
     l2 = np.atleast_1d(np.linalg.norm(a, order, axis))
-    l2[l2==0] = 1
+    l2[l2 == 0] = 1
     return a / np.expand_dims(l2, axis)
+
 
 def parse_votable(file_path, content):
     """
@@ -40,13 +38,14 @@ def parse_votable(file_path, content):
         flux = float(values[1].text)
         spectral_col.append(spectral)
         flux_col.append(flux)
-    assert(len(flux_col) > 0)
+    assert (len(flux_col) > 0)
     series = pd.DataFrame(data=[flux_col], columns=spectral_col,
                           index=[name])
     logger.debug(series)
     return series
 
-def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=False, normalize=True):
+
+def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=False, renormalize=True):
     """Resamples the spectrum so that the x-axis starts at low and ends at high, while
     keeping the delta between the wavelengths"""
     resampled_header = resampled_header_broadcast.value
@@ -63,9 +62,12 @@ def resample(spectrum, resampled_header_broadcast, label_col=None, convolve=Fals
         to_interpolate = without_label.iloc[0].values
     logger.debug(without_label)
     interpolated = np.interp(resampled_header, without_label.columns.values, to_interpolate)
-    interpolated = interpolated[3:-3]  # remove some weird artefacts that might happen because of convo/interpolation
-    if normalize:
-            interpolated = prep.minmax_scale([interpolated], axis=1)
+    interpolated = interpolated[3:-3]  # remove some weird artifacts that might happen because of convo/interpolation
+    if renormalize:
+        # normalization per each sample
+        interpolated = prep.minmax_scale([interpolated], axis=1)
+    else:
+        interpolated = np.array([interpolated])
     logger.debug("Interpolated:%s", interpolated)
     interpolated_df = pd.DataFrame(data=interpolated, columns=resampled_header[3:-3], index=spectrum.index.values)
     if label_col is not None:
@@ -82,9 +84,14 @@ def parse_fits(path, content, low, high):
         crval1, crpix1 = hdu.header["CRVAL1"], hdu.header["CRPIX1"]
         cdelt1 = hdu.header["CD1_1"]
         name = os.path.basename(os.path.splitext(path)[0])
+
         def specTrans(pixNo):
-            return 10**(crval1+(pixNo+1-crpix1)*cdelt1)
-        return pd.DataFrame.from_records({specTrans(spec): flux for spec, flux in enumerate(hdu.data[2]) if low < specTrans(spec) < high}, index=[name])
+            return 10 ** (crval1 + (pixNo + 1 - crpix1) * cdelt1)
+
+        return pd.DataFrame.from_records(
+            {specTrans(spec): flux for spec, flux in enumerate(hdu.data[2]) if low < specTrans(spec) < high},
+            index=[name])
+
 
 def parse_spectra_file(file_path, content, low, high):
     ext = os.path.splitext(file_path)[1]
@@ -101,6 +108,7 @@ def high_low_op(acc, x):
     w_low = max(acc[0], x.columns[0])
     w_high = min(acc[1], x.columns[-1])
     return w_low, w_high
+
 
 def high_low_comb(acc1, acc2):
     w_low = max(acc1[0], acc2[0])
@@ -129,33 +137,39 @@ def preprocess(sc, files_rdd, labeled_spectra, cut, label=True, **kwargs):
     # TODO support archives
     cut_low = cut['low']
     cut_high = cut['high']
-    spectra = files_rdd.map(lambda x: parse_spectra_file(x[0], x[1], cut_low, cut_high)).filter(lambda x: x is not None).cache()
-    low, high = spectra.union(labeled_spectra.map(lambda x: x.drop(x.columns[-1], axis=1))).aggregate((0.0, sys.float_info.max), high_low_op, high_low_comb)
+    spectra = files_rdd.map(lambda x: parse_spectra_file(x[0], x[1], cut_low, cut_high)).filter(
+        lambda x: x is not None).cache()
+    low, high = spectra.union(labeled_spectra.map(lambda x: x.drop(x.columns[-1], axis=1))).aggregate(
+        (0.0, sys.float_info.max), high_low_op, high_low_comb)
     mean_step = spectra.map(lambda x: x.columns[1] - x.columns[0]).mean()
     logger.debug("low %f high %f %f", low, high, mean_step)
     resampled_header = sc.broadcast(np.arange(low, high, mean_step))
-    spectra = spectra.map(lambda x: resample(x, resampled_header_broadcast=resampled_header, normalize=kwargs.get('minmax_scale')))
+    spectra = spectra.map(
+        lambda x: resample(x, resampled_header_broadcast=resampled_header, renormalize=kwargs.get('minmax_scale')))
     if label:
         spectra = spectra.map(lambda x: x.assign(label=pd.Series([-1], index=x.index)))
 
     if labeled_spectra is not None:
-        spectra = labeled_spectra.map(lambda x: resample(x, resampled_header_broadcast=resampled_header, label_col="label" if label else None,
-                                                         convolve=True, normalize=kwargs.get('minmax_scale'))).union(spectra).repartition(kwargs.get("partitions", 100))
+        spectra = labeled_spectra.map(
+            lambda x: resample(x, resampled_header_broadcast=resampled_header, label_col="label" if label else None,
+                               convolve=True, renormalize=kwargs.get('renormalize'))).union(spectra).repartition(
+            kwargs.get("partitions", 100))
 
     if kwargs.get('pca') is not None:
-        namesByRow = spectra.zipWithIndex().map(lambda s: (s[1], (s[0].index, s[0]['label'].iloc[0])) if label else (s[1], s[0].index))
+        namesByRow = spectra.zipWithIndex().map(
+            lambda s: (s[1], (s[0].index, s[0]['label'].iloc[0])) if label else (s[1], s[0].index))
         logger.info("Doing PCA")
         pca_params = kwargs['pca']
         k = pca_params.get("k", 10)
         pca = PCA(k)
         fitted_pca = pca.fit(spectra.map(lambda x: Vectors.dense(x[x.columns[:-1]].iloc[0].values)))
         transformed_spectra = fitted_pca.transform(spectra.
-                                       map(lambda x: transform_pca(x))).zipWithIndex(). \
+                                                   map(lambda x: transform_pca(x))).zipWithIndex(). \
             map(lambda x: (x[1], x[0])).join(namesByRow)
         spectra = transformed_spectra.map(lambda x: pd.DataFrame(data=[x[1][0].tolist() +
-                                       ([x[1][1][1]] if label else [])],
-                                       index=x[1][1][0] if label else x[2],
-                                       columns=range(k) + ['label'] if label else range(k)))
+                                                                       ([x[1][1][1]] if label else [])],
+                                                                 index=x[1][1][0] if label else x[2],
+                                                                 columns=range(k) + ['label'] if label else range(k)))
 
     return resampled_header.value, spectra.sortBy(lambda x: x['label'].values[0], ascending=False,
                                                   numPartitions=kwargs.get("partitions", 100))
