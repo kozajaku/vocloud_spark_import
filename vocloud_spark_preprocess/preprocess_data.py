@@ -14,6 +14,7 @@ import sklearn.preprocessing as prep
 
 __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

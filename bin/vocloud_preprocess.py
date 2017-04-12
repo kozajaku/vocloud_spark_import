@@ -5,8 +5,6 @@ from astropy.io.votable import parse
 import pandas as pd
 
 import vocloud_spark_preprocess.preprocess_data as prep
-import logging
-import logging.config
 from pyspark import SparkConf, SparkContext
 from pyspark.sql import SQLContext
 import json
@@ -56,7 +54,6 @@ def transform_labels(df):
 
 
 def main(argv):
-    logging.config.fileConfig(os.path.join(os.path.dirname(os.path.realpath(__file__)), "logging.ini"))
     parsed_args = parse_args(argv)
     spark_conf = SparkConf()
     sc = SparkContext(conf=spark_conf)
