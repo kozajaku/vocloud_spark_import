@@ -3,6 +3,8 @@ import sys
 import argparse
 from astropy.io.votable import parse
 import pandas as pd
+import io
+
 
 import vocloud_spark_preprocess.preprocess_data as prep
 from pyspark import SparkConf, SparkContext
@@ -12,8 +14,10 @@ import json
 __author__ = 'Andrej Palicka <andrej.palicka@merck.com>'
 
 
-def parse_metadata(metadata_file):
-    metadata = parse(metadata_file)
+def parse_metadata(sc, metadata_file):
+    meta = sc.textFile(metadata_file)
+    f = io.StringIO("\n".join(meta.collect()))
+    metadata = parse(f)
     return metadata.get_first_table().to_table().to_pandas()["intensities"].iloc[0]
 
 
@@ -73,7 +77,7 @@ def main(argv):
         else:
             files = sc.wholeTextFiles(preprocess_conf["input"], preprocess_conf.get('partitions', 4000))
     files = files.repartition(preprocess_conf.get('partitions', 4000))
-    metadata = parse_metadata(preprocess_conf["labeled"]["metadata"])
+    metadata = parse_metadata(sc, preprocess_conf["labeled"]["metadata"])
     labeled = sc.textFile(preprocess_conf["labeled"]["file"], preprocess_conf.get('partitions', 4000)). \
         map(lambda x: parse_labeled_line(x, metadata, True)).filter(lambda x: x.iloc[0]["label"] != 4).map(
         transform_labels)
